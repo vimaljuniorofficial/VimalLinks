@@ -6,10 +6,6 @@
 <script>
 (() => {
   try {
-    if (location.hostname && location.hostname.toLowerCase() === 'vimallinks.vercel.app') {
-      location.replace('https://www.vimallinks.bond' + location.pathname + location.search + location.hash);
-      return;
-    }
     const desc = Object.getOwnPropertyDescriptor(window, 'fetch') || Object.getOwnPropertyDescriptor(Window.prototype, 'fetch');
     if (desc && desc.get && !desc.set && desc.configurable) {
       const origGet = desc.get;
