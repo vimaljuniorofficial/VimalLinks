@@ -3,30 +3,6 @@
   "framework": "vite",
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
-  "redirects": [
-    {
-      "source": "/",
-      "has": [
-        {
-          "type": "host",
-          "value": "vimallinks\\.vercel\\.app"
-        }
-      ],
-      "destination": "https://www.vimallinks.bond/",
-      "permanent": true
-    },
-    {
-      "source": "/:path*",
-      "has": [
-        {
-          "type": "host",
-          "value": "vimallinks\\.vercel\\.app"
-        }
-      ],
-      "destination": "https://www.vimallinks.bond/:path*",
-      "permanent": true
-    }
-  ],
   "rewrites": [
     {
       "source": "/(.*)",
