@@ -1,0 +1,6 @@
+{
+  "name": "FolioLinks",
+  "description": "Editorial link-in-bio portfolio and studio admin dashboard with standalone HTML export.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
