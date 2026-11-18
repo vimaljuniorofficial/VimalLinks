@@ -891,7 +891,7 @@ dialog h3 { font-family: var(--font-display); font-size: 1.2rem; font-weight: 60
         </button>
       </div>
       <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border);text-align:center;">
-        <a href="#" style="font-size:.78rem;color:var(--text-dim);font-weight:500;">← Back to public page</a>
+        <a id="backToPublicLink" href="/" style="font-size:.78rem;color:var(--text-dim);font-weight:500;">← Back to public page</a>
       </div>
     </form>
   </div>
@@ -910,7 +910,7 @@ dialog h3 { font-family: var(--font-display); font-size: 1.2rem; font-weight: 60
       <a href="#sec-backup" onclick="document.getElementById('sec-backup').scrollIntoView({behavior:'smooth'});return false;">Backup</a>
     </nav>
     <div class="admin-actions">
-      <a class="btn btn-accent btn-sm" href="#"><i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i> View Site</a>
+      <a id="viewSiteBtn" class="btn btn-accent btn-sm" href="/"><i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i> View Site</a>
       <button id="logoutBtn" class="btn btn-outline btn-sm" type="button" aria-label="Logout"><i class="fa-solid fa-right-from-bracket" aria-hidden="true"></i> <span class="hide-xs">Logout</span></button>
     </div>
   </header>
@@ -1627,9 +1627,17 @@ dialog h3 { font-family: var(--font-display); font-size: 1.2rem; font-weight: 60
     }
   };
 
+  const isAdminPath = () => {
+    const p = (location.pathname || '').replace(/\/+$/, '').toLowerCase();
+    return p === '/admin';
+  };
+  const isAdminHash = () => {
+    const h = (location.hash || '').replace(/^#\/?/, '').replace(/\/+$/, '').toLowerCase();
+    return h === 'admin';
+  };
+
   const route = () => {
-    const hash = (location.hash || '').replace(/^#\/?/, '').toLowerCase();
-    const adminRoute = hash === 'admin';
+    const adminRoute = isAdminPath() || isAdminHash();
     const authed = isAuthed();
     $('#publicView').hidden = adminRoute;
     $('#loginView').hidden = !(adminRoute && !authed);
@@ -1641,7 +1649,20 @@ dialog h3 { font-family: var(--font-display); font-size: 1.2rem; font-weight: 60
       renderPublic();
     }
   };
+
+  const goPublic = e => {
+    if (e) e.preventDefault();
+    if (location.protocol !== 'file:' && isAdminPath() && history && history.pushState) {
+      history.pushState(null, '', '/');
+    }
+    if (location.hash) location.hash = '';
+    route();
+  };
+
+  $('#backToPublicLink')?.addEventListener('click', goPublic);
+  $('#viewSiteBtn')?.addEventListener('click', goPublic);
   window.addEventListener('hashchange', route);
+  window.addEventListener('popstate', route);
 
   /* Public actions */
   $('#themeBtn').addEventListener('click', () => {
@@ -1924,8 +1945,7 @@ dialog h3 { font-family: var(--font-display); font-size: 1.2rem; font-weight: 60
   /* Logout */
   $('#logoutBtn').addEventListener('click', () => {
     sessionStorage.removeItem(AUTH_KEY);
-    location.hash = '';
-    route();
+    goPublic();
   });
 
   route();
