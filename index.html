@@ -975,7 +975,7 @@ dialog h3 { font-family: var(--font-display); font-size: 1.2rem; font-weight: 60
         </div>
         <button id="resetBtn" class="btn btn-danger btn-sm" type="button" style="width:100%;margin-top:10px;"><i class="fa-solid fa-trash-can" aria-hidden="true"></i> Reset all data</button>
         <p style="font-size:.74rem;color:var(--text-dim);margin-top:12px;line-height:1.55;">
-          Data is stored in this browser. Export a JSON backup before clearing site data.
+          Changes sync automatically to Firebase Realtime Database and cache locally in this browser.
         </p>
       </section>
     </div>
@@ -1063,6 +1063,7 @@ dialog h3 { font-family: var(--font-display); font-size: 1.2rem; font-weight: 60
   const KEY = 'vimalsoren_links_v1';
   const AUTH_KEY = 'vimalsoren_auth_v1';
   const THEME_KEY = 'vimalsoren_theme_v1';
+  const FIREBASE_DB_URL = 'https://vimal-links-default-rtdb.asia-southeast1.firebasedatabase.app/vimallinks.json';
 
   const DEFAULT_AVATAR = 'data:image/svg+xml,' + encodeURIComponent(
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120">' +
@@ -1305,10 +1306,40 @@ dialog h3 { font-family: var(--font-display); font-size: 1.2rem; font-weight: 60
     return img;
   };
 
+  const sha256Hex = async str => {
+    try {
+      if (window.crypto && crypto.subtle) {
+        const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+        return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+      }
+    } catch {}
+    let h1 = 0x811c9dc5, h2 = 0x9e3779b9;
+    for (let i = 0; i < str.length; i++) {
+      const c = str.charCodeAt(i);
+      h1 = Math.imul(h1 ^ c, 0x01000193);
+      h2 = Math.imul(h2 ^ (c + i), 0x85ebca6b);
+    }
+    return 'fb_' + (h1 >>> 0).toString(16).padStart(8, '0') + (h2 >>> 0).toString(16).padStart(8, '0');
+  };
+
+  const verifyPassword = async (entered, settings) => {
+    if (settings.passwordHash) {
+      const h = await sha256Hex(entered);
+      if (h === settings.passwordHash) return true;
+    }
+    if (typeof settings.password === 'string' && entered === settings.password) {
+      return true;
+    }
+    return false;
+  };
+
   const normalise = d => {
     const base = clone(DEFAULTS);
     if (!d || typeof d !== 'object') return base;
     const mergedSettings = Object.assign(base.settings, d.settings || {});
+    if (mergedSettings.passwordHash && !(d.settings && d.settings.password)) {
+      delete mergedSettings.password;
+    }
     if (mergedSettings.shareTitle === 'Vimal Soren — Links' || mergedSettings.shareTitle === 'Aarav Sharma — Links') {
       mergedSettings.shareTitle = 'Vimal Links';
     }
@@ -1334,20 +1365,79 @@ dialog h3 { font-family: var(--font-display); font-size: 1.2rem; font-weight: 60
     };
   };
 
+  let hasLocalSave = false;
   const loadData = () => {
     try {
       const raw = localStorage.getItem(KEY);
+      hasLocalSave = !!raw;
       return normalise(raw ? JSON.parse(raw) : null);
     } catch { return normalise(null); }
   };
 
-  const saveData = d => {
+  const saveLocal = d => {
     try { localStorage.setItem(KEY, JSON.stringify(d)); return true; }
     catch { return false; }
   };
 
+  let cloudQueue = Promise.resolve();
+  const toCloudPayload = async d => {
+    const copy = clone(d);
+    if (copy.settings) {
+      if (!copy.settings.passwordHash && typeof copy.settings.password === 'string') {
+        copy.settings.passwordHash = await sha256Hex(copy.settings.password);
+      }
+      delete copy.settings.password;
+    }
+    return copy;
+  };
+
+  const syncToCloud = d => {
+    if (typeof fetch !== 'function') return Promise.resolve(false);
+    cloudQueue = cloudQueue.then(async () => {
+      try {
+        const payload = await toCloudPayload(d);
+        const res = await fetch(FIREBASE_DB_URL, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        return true;
+      } catch {
+        toast('Saved locally — Firebase sync failed', true);
+        return false;
+      }
+    });
+    return cloudQueue;
+  };
+
+  const saveData = (d, syncCloud = true) => {
+    const ok = saveLocal(d);
+    if (ok && syncCloud) syncToCloud(d);
+    return ok;
+  };
+
   const data = loadData();
   const isAuthed = () => sessionStorage.getItem(AUTH_KEY) === '1';
+
+  const syncFromCloud = async () => {
+    if (typeof fetch !== 'function') return;
+    try {
+      const res = await fetch(FIREBASE_DB_URL, { cache: 'no-store' });
+      if (!res.ok) return;
+      const remote = await res.json();
+      if (remote && typeof remote === 'object' && remote.settings && Array.isArray(remote.links)) {
+        const next = normalise(remote);
+        data.settings = next.settings;
+        data.links = next.links;
+        data.socials = next.socials;
+        saveLocal(data);
+        route();
+      } else if (remote === null && hasLocalSave) {
+        syncToCloud(data);
+      }
+    } catch {}
+  };
 
   let toastTimer;
   const toast = (msg, isErr) => {
@@ -1724,9 +1814,15 @@ dialog h3 { font-family: var(--font-display); font-size: 1.2rem; font-weight: 60
   });
 
   /* Login */
-  $('#loginForm').addEventListener('submit', e => {
+  $('#loginForm').addEventListener('submit', async e => {
     e.preventDefault();
-    if ($('#loginPassword').value === data.settings.password) {
+    const entered = $('#loginPassword').value;
+    if (await verifyPassword(entered, data.settings)) {
+      if (!data.settings.passwordHash) {
+        data.settings.passwordHash = await sha256Hex(entered);
+        delete data.settings.password;
+        saveLocal(data);
+      }
       sessionStorage.setItem(AUTH_KEY, '1');
       $('#loginError').hidden = true;
       $('#loginPassword').value = '';
@@ -1910,12 +2006,15 @@ dialog h3 { font-family: var(--font-display); font-size: 1.2rem; font-weight: 60
   });
 
   /* Password */
-  $('#passwordForm').addEventListener('submit', function (e) {
+  $('#passwordForm').addEventListener('submit', async function (e) {
     e.preventDefault();
-    if ($('#pwCurrent').value !== data.settings.password) return toast('Current password is incorrect', true);
+    if (!(await verifyPassword($('#pwCurrent').value, data.settings))) {
+      return toast('Current password is incorrect', true);
+    }
     if ($('#pwNew').value.length < 4) return toast('New password must be at least 4 characters', true);
     if ($('#pwNew').value !== $('#pwConfirm').value) return toast('New passwords do not match', true);
-    data.settings.password = $('#pwNew').value;
+    data.settings.passwordHash = await sha256Hex($('#pwNew').value);
+    delete data.settings.password;
     if (saveData(data)) { this.reset(); toast('Password updated'); }
   });
 
@@ -1955,10 +2054,11 @@ dialog h3 { font-family: var(--font-display); font-size: 1.2rem; font-weight: 60
 
   /* Reset */
   $('#resetBtn').addEventListener('click', () => {
-    askConfirm('Reset all data', 'Restore default profile, links, and settings? This cannot be undone.', 'Reset everything', () => {
+    askConfirm('Reset all data', 'Restore default profile, links, and settings? This cannot be undone.', 'Reset everything', async () => {
       localStorage.removeItem(KEY);
       localStorage.removeItem(THEME_KEY);
       sessionStorage.removeItem(AUTH_KEY);
+      try { await fetch(FIREBASE_DB_URL, { method: 'DELETE' }); } catch {}
       location.reload();
     });
   });
@@ -1970,6 +2070,7 @@ dialog h3 { font-family: var(--font-display); font-size: 1.2rem; font-weight: 60
   });
 
   route();
+  syncFromCloud();
 })();
 </script>
 </body>
